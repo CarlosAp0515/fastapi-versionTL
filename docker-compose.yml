@@ -1,0 +1,36 @@
+
+
+services:
+  # --- CONTENEDOR 1: LA BASE DE DATOS ---
+  db:
+    image: postgres:15
+    container_name: mi_postgres_local
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: superpassword
+      POSTGRES_DB: app_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Esto guarda los datos para que no se borren
+    healthcheck: # Valida que la BD esté lista antes de conectar la API
+      test: ["CMD-SHELL", "pg_isready -U admin -d app_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- CONTENEDOR 2: TU API FASTAPI ---
+  api:
+    build: . # Le dice que construya el Dockerfile que creaste en el Paso 1
+    container_name: mi_fastapi_local
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env # Le pasa tus variables de entorno a la API
+    depends_on:
+      db:
+        condition: service_healthy # La API esperará a que el healthcheck de la BD sea exitoso
+
+# Declaramos el volumen de persistencia
+volumes:
+  postgres_data:

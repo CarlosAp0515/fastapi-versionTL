@@ -62,7 +62,41 @@ def get_products(session: SessionDep):
 
 
 @app.delete("/product/{id}")
-def delete_product(product_id: int, session: SessionDep):
-    product = session.exec(select(Product).where(Product.id == product_id)).one()
+def delete_product(id: int, session: SessionDep):
+    product = session.exec(select(Product).where(Product.id == id)).one()
     session.delete(product)
     session.commit()
+    return {"message": "Producto eliminado exitosamente"}
+
+@app.get("/product/{id}")
+def get_product_by_id(id: int, session: SessionDep):
+    # Usamos session.get para buscar por la llave primaria (id)
+    product = session.get(Product, id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return product
+
+@app.put("/product/{id}")
+def update_product(id: int, product_data: CreateProduct, session: SessionDep):
+    # 1. Verificamos que el producto a actualizar exista
+    product_db = session.get(Product, id)
+    if not product_db:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
+    # 2. Reutilizamos tus mismas validaciones de negocio
+    if product_data.price <= 0:
+        raise HTTPException(status_code=422, detail="El precio del producto debe ser superior a 0")
+    if product_data.quantity <= 0:
+        raise HTTPException(status_code=422, detail="La cantidad del producto debe ser superior a 0")
+
+    # 3. Actualizamos los datos
+    product_db.name = product_data.name
+    product_db.price = product_data.price
+    product_db.quantity = product_data.quantity
+    product_db.category = product_data.category
+
+    session.add(product_db)
+    session.commit()
+    session.refresh(product_db)
+    
+    return product_db
