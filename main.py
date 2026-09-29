@@ -1,12 +1,48 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlmodel import select
 from src.models.product_model import Product, ProductCategories
 from src.shared.database.session_db import SessionDep, get_session
 
+import boto3
+import os
+
+# 1. PRIMERO CREAMOS LA INSTANCIA DE FASTAPI
 app = FastAPI()
 
+# 2. INICIALIZAR EL CLIENTE DE AWS S3 (con la doble 's' en access)
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    region_name=os.getenv("AWS_REGION")
+)
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
+
+# 3. ENDPOINTS DE SALUD Y S3
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "message": "La aplicación está funcionando correctamente"}
+
+
+@app.post("/images")
+def upload_image(file: UploadFile = File(...)):
+    # Validar que sea una imagen
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Archivo no permitido. Debe ser una imagen")
+
+    try:
+        # Subir el archivo al bucket S3 usando Boto3
+        s3_client.upload_fileobj(file.file, BUCKET_NAME, file.filename)
+        image_url = f"https://{BUCKET_NAME}.s3.{os.getenv('AWS_REGION')}.amazonaws.com/{file.filename}"
+
+        return {"message": "Imagen subida exitosamente", "reference_url": image_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error subiendo a S3: {str(e)}")
+
+
+# 4. MODELOS Y ENDPOINTS DEL CRUD DE PRODUCTOS
 class CreateProduct(BaseModel):
     name: str
     price: float
@@ -57,7 +93,6 @@ def create_product(product: CreateProduct, session: SessionDep):
 @app.get("/product")
 def get_products(session: SessionDep):
     products = session.exec(select(Product)).all()
-
     return products
 
 
@@ -68,28 +103,26 @@ def delete_product(id: int, session: SessionDep):
     session.commit()
     return {"message": "Producto eliminado exitosamente"}
 
+
 @app.get("/product/{id}")
 def get_product_by_id(id: int, session: SessionDep):
-    # Usamos session.get para buscar por la llave primaria (id)
     product = session.get(Product, id)
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     return product
 
+
 @app.put("/product/{id}")
 def update_product(id: int, product_data: CreateProduct, session: SessionDep):
-    # 1. Verificamos que el producto a actualizar exista
     product_db = session.get(Product, id)
     if not product_db:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     
-    # 2. Reutilizamos tus mismas validaciones de negocio
     if product_data.price <= 0:
         raise HTTPException(status_code=422, detail="El precio del producto debe ser superior a 0")
     if product_data.quantity <= 0:
         raise HTTPException(status_code=422, detail="La cantidad del producto debe ser superior a 0")
 
-    # 3. Actualizamos los datos
     product_db.name = product_data.name
     product_db.price = product_data.price
     product_db.quantity = product_data.quantity
